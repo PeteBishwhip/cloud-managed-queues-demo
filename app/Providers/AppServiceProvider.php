@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Queue\Connectors\BatchSqsConnector;
 use Carbon\CarbonImmutable;
+use Illuminate\Foundation\Cloud\QueueConnector;
 use Illuminate\Queue\Events\Looping;
 use Illuminate\Queue\Events\WorkerStopping;
 use Illuminate\Support\Facades\Date;
@@ -27,7 +28,20 @@ class AppServiceProvider extends ServiceProvider
         //     app()->isProduction(),
         // );
 
-        Queue::addConnector("sqs", fn() => new BatchSqsConnector());
+        Queue::addConnector('sqs', fn () => new BatchSqsConnector);
+
+        // On Laravel Cloud with managed queues, Cloud::bootManagedQueues() runs
+        // after BootProviders and re-registers the 'sqs' connector to wrap a
+        // vanilla SqsConnector inside its QueueConnector lifecycle wrapper —
+        // overriding the BatchSqsConnector we registered above. Extending the
+        // QueueConnector container binding lets us swap the inner connector
+        // back to BatchSqsConnector while preserving Cloud's job telemetry.
+        if (($_SERVER['LARAVEL_CLOUD_MANAGED_QUEUES'] ?? null) === '1') {
+            $this->app->extend(
+                QueueConnector::class,
+                fn ($_, $app) => new QueueConnector(new BatchSqsConnector, $app),
+            );
+        }
 
         $this->registerWorkerHeartbeat();
     }
@@ -43,20 +57,20 @@ class AppServiceProvider extends ServiceProvider
                 return;
             }
 
-            $workerId = gethostname() . ":" . getmypid();
+            $workerId = gethostname().':'.getmypid();
 
-            DB::table("workers")->updateOrInsert(
-                ["worker_id" => $workerId],
-                ["queue" => $event->queue, "started_at" => now()],
+            DB::table('workers')->updateOrInsert(
+                ['worker_id' => $workerId],
+                ['queue' => $event->queue, 'started_at' => now()],
             );
 
             $registered = true;
         });
 
         Event::listen(WorkerStopping::class, function (): void {
-            $workerId = gethostname() . ":" . getmypid();
+            $workerId = gethostname().':'.getmypid();
 
-            DB::table("workers")->where("worker_id", $workerId)->delete();
+            DB::table('workers')->where('worker_id', $workerId)->delete();
         });
     }
 }
