@@ -24,10 +24,19 @@ class DemoJob implements ShouldQueue
             'worker_id' => $workerId,
         ]);
 
-        usleep($this->workDurationMs * 1000);
+        $this->sleepFully($this->workDurationMs * 1000);
 
         JobMetric::where('id', $this->metricId)->update([
             'completed_at' => microtime(true),
         ]);
+    }
+
+    private function sleepFully(int $microseconds): void
+    {
+        $deadline = microtime(true) + ($microseconds / 1_000_000);
+
+        while (($remaining = $deadline - microtime(true)) > 0) {
+            usleep((int) ($remaining * 1_000_000));
+        }
     }
 }
